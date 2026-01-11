@@ -124,8 +124,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@electron/notarize": "^2.3.0",
-    "@emotion/react": "^11.11.0",
-    "@emotion/styled": "^11.11.0",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-label": "^2.1.0",
     "@radix-ui/react-slot": "^1.1.0",
