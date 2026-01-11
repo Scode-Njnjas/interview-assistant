@@ -7,6 +7,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AudioRecorder } from '../../utils/audioRecorder';
+import { ConversationCommands } from './ConversationCommands';
 
 interface ConversationMessage {
   id: string;
@@ -57,12 +58,25 @@ export const ConversationSection: React.FC = () => {
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [tooltipHeight, setTooltipHeight] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
+  
   // Use ref to track recording state for event listener
   const isRecordingRef = useRef(false);
+  
+  const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
+    setTooltipHeight(height);
+  };
+  
+  const handleClearConversation = async () => {
+    try {
+      await window.electronAPI.clearConversation();
+    } catch (error) {
+      console.error('Failed to clear conversation:', error);
+    }
+  };
   
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -250,38 +264,26 @@ export const ConversationSection: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Recording Controls - Always visible at top */}
-      <div className="flex items-center gap-3 flex-wrap flex-shrink-0 mb-3">
-        <button
-          onClick={isRecording ? handleStopRecording : handleStartRecording}
-          disabled={isProcessing}
-          className={`px-3 py-1.5 rounded text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
-            isRecording
-              ? 'bg-red-600 hover:bg-red-700 text-white'
-              : 'bg-green-600 hover:bg-green-700 text-white'
-          }`}
-        >
-          {isRecording ? `⏹ Stop (${formatDuration(recordingDuration)})` : '⏺ Start Recording'}
-        </button>
-        
-        <button
-          onClick={handleToggleSpeaker}
-          disabled={isRecording || isProcessing}
-          className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {currentSpeaker === 'interviewer' ? '👤 Interviewer' : '🎤 You'}
-        </button>
-        
-        {isProcessing && (
-          <span className="text-xs text-white/70">Processing...</span>
-        )}
-      </div>
+      {/* Conversation Commands Bar - Matches QueueCommands/SolutionCommands style */}
+      <ConversationCommands
+        onTooltipVisibilityChange={handleTooltipVisibilityChange}
+        isRecording={isRecording}
+        isProcessing={isProcessing}
+        recordingDuration={recordingDuration}
+        currentSpeaker={currentSpeaker}
+        onStartRecording={handleStartRecording}
+        onStopRecording={handleStopRecording}
+        onToggleSpeaker={handleToggleSpeaker}
+        onClearConversation={handleClearConversation}
+      />
 
       {/* Scrollable Conversation Area - Takes remaining space above AI suggestions */}
       <div 
-        className="overflow-y-auto flex-1 min-h-0 mb-3 pr-2"
+        className="overflow-y-auto flex-1 min-h-0 mb-3 pr-2 mt-2"
         style={{ 
-          maxHeight: aiSuggestions ? 'calc(100% - 180px)' : '100%',
+          maxHeight: aiSuggestions 
+            ? `calc(100% - ${180 + tooltipHeight}px)` 
+            : `calc(100% - ${60 + tooltipHeight}px)`,
           scrollBehavior: 'smooth'
         }}
       >
