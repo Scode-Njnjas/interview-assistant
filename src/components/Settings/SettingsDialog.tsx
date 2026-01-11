@@ -184,6 +184,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const [extractionModel, setExtractionModel] = useState("gpt-4o");
   const [solutionModel, setSolutionModel] = useState("gpt-4o");
   const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
+  const [speechRecognitionModel, setSpeechRecognitionModel] = useState("whisper-1");
   const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
 
@@ -213,6 +214,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel?: string;
         solutionModel?: string;
         debuggingModel?: string;
+        speechRecognitionModel?: string;
       }
 
       window.electronAPI
@@ -223,6 +225,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setExtractionModel(config.extractionModel || "gpt-4o");
           setSolutionModel(config.solutionModel || "gpt-4o");
           setDebuggingModel(config.debuggingModel || "gpt-4o");
+          setSpeechRecognitionModel(config.speechRecognitionModel || "whisper-1");
         })
         .catch((error: unknown) => {
           console.error("Failed to load config:", error);
@@ -243,14 +246,17 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       setExtractionModel("gpt-4o");
       setSolutionModel("gpt-4o");
       setDebuggingModel("gpt-4o");
+      setSpeechRecognitionModel("whisper-1");
     } else if (provider === "gemini") {
       setExtractionModel("gemini-1.5-pro");
       setSolutionModel("gemini-1.5-pro");
       setDebuggingModel("gemini-1.5-pro");
+      setSpeechRecognitionModel("whisper-1"); // Keep whisper-1 but will show as not supported
     } else if (provider === "anthropic") {
       setExtractionModel("claude-3-7-sonnet-20250219");
       setSolutionModel("claude-3-7-sonnet-20250219");
       setDebuggingModel("claude-3-7-sonnet-20250219");
+      setSpeechRecognitionModel("whisper-1"); // Keep whisper-1 but will show as not supported
     }
   };
 
@@ -263,6 +269,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel,
         solutionModel,
         debuggingModel,
+        speechRecognitionModel,
       });
       
       if (result) {
@@ -568,6 +575,47 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                 </div>
               );
             })}
+          </div>
+          
+          {/* Speech Recognition Model Selection */}
+          <div className="space-y-2 mt-4">
+            <label className="text-sm font-medium text-white mb-1 block">
+              Speech Recognition Model
+            </label>
+            <p className="text-xs text-white/60 mb-2">
+              Model used for transcribing interview conversations
+            </p>
+            
+            {apiProvider === "openai" ? (
+              <div className="space-y-2">
+                <div
+                  className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                    speechRecognitionModel === "whisper-1"
+                      ? "bg-white/10 border border-white/20"
+                      : "bg-black/30 border border-white/5 hover:bg-white/5"
+                  }`}
+                  onClick={() => setSpeechRecognitionModel("whisper-1")}
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-3 h-3 rounded-full ${
+                        speechRecognitionModel === "whisper-1" ? "bg-white" : "bg-white/20"
+                      }`}
+                    />
+                    <div>
+                      <p className="font-medium text-white text-xs">Whisper-1</p>
+                      <p className="text-xs text-white/60">OpenAI's speech-to-text model</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 rounded-lg bg-black/30 border border-white/10">
+                <p className="text-sm text-white/70">
+                  Speech recognition is only supported with OpenAI. Please switch to OpenAI provider to use this feature.
+                </p>
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter className="flex justify-between sm:justify-between">

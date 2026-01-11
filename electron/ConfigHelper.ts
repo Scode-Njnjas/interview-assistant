@@ -11,6 +11,7 @@ interface Config {
   extractionModel: string;
   solutionModel: string;
   debuggingModel: string;
+  speechRecognitionModel: string;  // Speech recognition model (Whisper for OpenAI)
   language: string;
   opacity: number;
 }
@@ -23,6 +24,7 @@ export class ConfigHelper extends EventEmitter {
     extractionModel: "gemini-2.0-flash", // Default to Flash for faster responses
     solutionModel: "gemini-2.0-flash",
     debuggingModel: "gemini-2.0-flash",
+    speechRecognitionModel: "whisper-1", // Default to Whisper for OpenAI
     language: "python",
     opacity: 1.0
   };
@@ -110,6 +112,15 @@ export class ConfigHelper extends EventEmitter {
           config.debuggingModel = this.sanitizeModelSelection(config.debuggingModel, config.apiProvider);
         }
         
+        // Ensure speechRecognitionModel is valid (only whisper-1 for OpenAI)
+        if (config.speechRecognitionModel && config.apiProvider === "openai") {
+          if (config.speechRecognitionModel !== "whisper-1") {
+            config.speechRecognitionModel = "whisper-1";
+          }
+        } else if (!config.speechRecognitionModel) {
+          config.speechRecognitionModel = this.defaultConfig.speechRecognitionModel;
+        }
+        
         return {
           ...this.defaultConfig,
           ...config
@@ -174,14 +185,25 @@ export class ConfigHelper extends EventEmitter {
           updates.extractionModel = "gpt-4o";
           updates.solutionModel = "gpt-4o";
           updates.debuggingModel = "gpt-4o";
+          updates.speechRecognitionModel = "whisper-1";
         } else if (updates.apiProvider === "anthropic") {
           updates.extractionModel = "claude-3-7-sonnet-20250219";
           updates.solutionModel = "claude-3-7-sonnet-20250219";
           updates.debuggingModel = "claude-3-7-sonnet-20250219";
+          // Speech recognition not supported for Anthropic
         } else {
           updates.extractionModel = "gemini-2.0-flash";
           updates.solutionModel = "gemini-2.0-flash";
           updates.debuggingModel = "gemini-2.0-flash";
+          // Speech recognition not supported for Gemini
+        }
+      }
+      
+      // Validate speech recognition model (only whisper-1 is supported, and only for OpenAI)
+      if (updates.speechRecognitionModel) {
+        if (provider === "openai" && updates.speechRecognitionModel !== "whisper-1") {
+          console.warn(`Invalid speech recognition model: ${updates.speechRecognitionModel}. Only whisper-1 is supported for OpenAI.`);
+          updates.speechRecognitionModel = "whisper-1";
         }
       }
       
@@ -203,7 +225,8 @@ export class ConfigHelper extends EventEmitter {
       // This prevents re-initializing the AI client when only opacity changes
       if (updates.apiKey !== undefined || updates.apiProvider !== undefined || 
           updates.extractionModel !== undefined || updates.solutionModel !== undefined || 
-          updates.debuggingModel !== undefined || updates.language !== undefined) {
+          updates.debuggingModel !== undefined || updates.speechRecognitionModel !== undefined || 
+          updates.language !== undefined) {
         this.emit('config-updated', newConfig);
       }
       

@@ -25,15 +25,24 @@ export class TranscriptionHelper implements ITranscriptionHelper {
     this.tempDir = path.join(app.getPath('temp'), 'audio-transcriptions');
     this.ensureTempDirectory();
     this.initializeOpenAI();
+    
+    // Listen for config changes to re-initialize
+    configHelper.on('config-updated', () => {
+      this.initializeOpenAI();
+    });
   }
 
   /**
    * Initializes OpenAI client with API key from config
+   * Only initializes if provider is OpenAI (Whisper only works with OpenAI)
    */
   private initializeOpenAI(): void {
     const config = configHelper.loadConfig();
-    if (config.apiKey && config.apiKey.trim().length > 0) {
+    if (config.apiProvider === "openai" && config.apiKey && config.apiKey.trim().length > 0) {
       this.openai = new OpenAI({ apiKey: config.apiKey });
+    } else if (config.apiProvider !== "openai") {
+      console.log("Speech recognition is only supported with OpenAI provider");
+      this.openai = null;
     }
   }
 
@@ -57,8 +66,14 @@ export class TranscriptionHelper implements ITranscriptionHelper {
     audioBuffer: Buffer, 
     mimeType: string = 'audio/webm'
   ): Promise<TranscriptionResult> {
+    const config = configHelper.loadConfig();
+    
+    if (config.apiProvider !== "openai") {
+      throw new Error('Speech recognition is only supported with OpenAI provider. Please switch to OpenAI in settings.');
+    }
+    
     if (!this.openai) {
-      throw new Error('OpenAI client not initialized. Please set API key.');
+      throw new Error('OpenAI client not initialized. Please set OpenAI API key in settings.');
     }
 
     if (!audioBuffer || audioBuffer.length === 0) {
@@ -74,10 +89,14 @@ export class TranscriptionHelper implements ITranscriptionHelper {
       // Create read stream for OpenAI API
       const file = fs.createReadStream(tempPath);
       
+      // Get speech recognition model from config
+      const config = configHelper.loadConfig();
+      const speechModel = config.speechRecognitionModel || 'whisper-1';
+      
       // Transcribe using Whisper API
       const transcription = await this.openai.audio.transcriptions.create({
         file: file,
-        model: 'whisper-1',
+        model: speechModel,
         language: 'en', // Optional: can be auto-detected
         response_format: 'verbose_json',
       });
