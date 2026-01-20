@@ -54,8 +54,8 @@ export interface ElectronAPI {
   getPlatform: () => string
   
   // New methods for OpenAI integration
-  getConfig: () => Promise<{ apiKey: string; model: string; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string }>
-  updateConfig: (config: { apiKey?: string; model?: string; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string }) => Promise<boolean>
+  getConfig: () => Promise<{ apiKey: string; model: string; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string; candidateProfile?: any }>
+  updateConfig: (config: { apiKey?: string; model?: string; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string; candidateProfile?: any }) => Promise<boolean>
   checkApiKey: () => Promise<boolean>
   validateApiKey: (apiKey: string) => Promise<{ valid: boolean; error?: string }>
   openLink: (url: string) => void
@@ -69,7 +69,7 @@ export interface ElectronAPI {
   getConversation: () => Promise<{ success: boolean; messages?: any[]; error?: string }>
   clearConversation: () => Promise<{ success: boolean; error?: string }>
   updateConversationMessage: (messageId: string, newText: string) => Promise<{ success: boolean; error?: string }>
-  getAnswerSuggestions: (question: string, screenshotContext?: string) => Promise<{ success: boolean; suggestions?: { suggestions: string[]; reasoning: string }; error?: string }>
+  getAnswerSuggestions: (question: string, screenshotContext?: string, candidateProfile?: any) => Promise<{ success: boolean; suggestions?: { suggestions: string[]; reasoning: string }; error?: string }>
   onConversationMessageAdded: (callback: (message: any) => void) => () => void
   onSpeakerChanged: (callback: (speaker: string) => void) => () => void
   onConversationMessageUpdated: (callback: (message: any) => void) => () => void

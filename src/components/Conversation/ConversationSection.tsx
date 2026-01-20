@@ -62,6 +62,7 @@ export const ConversationSection: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const processingCountRef = useRef(0);
   
   // Use ref to track recording state for event listener
   const isRecordingRef = useRef(false);
@@ -186,35 +187,49 @@ export const ConversationSection: React.FC = () => {
       durationIntervalRef.current = null;
     }
     
-    setIsProcessing(true);
     try {
       const audioBlob = await audioRecorderRef.current.stopRecording();
-      
-      // Convert blob to ArrayBuffer
+      const speakerAtStop = currentSpeaker;
+      setRecordingDuration(0);
+
+      // Kick off transcription/processing asynchronously so UI stays responsive
+      void processRecording(audioBlob, speakerAtStop);
+
+      // Auto-toggle speaker for the next recording cycle
+      void toggleSpeakerForNextTurn();
+    } catch (error: any) {
+      console.error('Failed to stop recording:', error);
+      alert(error.message || 'Failed to stop recording');
+    }
+  };
+
+  const processRecording = async (audioBlob: Blob, speaker: 'interviewer' | 'interviewee') => {
+    updateProcessingStatus(1);
+    try {
       const arrayBuffer = await audioBlob.arrayBuffer();
       
-      // Transcribe
       const transcribeResult = await window.electronAPI.transcribeAudio(arrayBuffer, audioBlob.type);
       
       if (transcribeResult.success && transcribeResult.result) {
         const text = transcribeResult.result.text;
         
-        // Add message
-        await window.electronAPI.addConversationMessage(text, currentSpeaker);
+        await window.electronAPI.addConversationMessage(text, speaker);
         
-        // If interviewer question, get AI suggestions
-        if (currentSpeaker === 'interviewer') {
+        if (speaker === 'interviewer') {
           await fetchAISuggestions(text);
         }
-        // Don't clear suggestions when interviewee responds - user needs to see them!
       }
     } catch (error: any) {
       console.error('Failed to process recording:', error);
       alert(error.message || 'Failed to process recording');
     } finally {
-      setIsProcessing(false);
-      setRecordingDuration(0);
+      updateProcessingStatus(-1);
     }
+  };
+
+  const updateProcessingStatus = (delta: number) => {
+    processingCountRef.current = Math.max(0, processingCountRef.current + delta);
+    setIsProcessing(processingCountRef.current > 0);
   };
 
   const fetchAISuggestions = async (question: string) => {
@@ -227,7 +242,11 @@ export const ConversationSection: React.FC = () => {
         screenshotContext = `Problem Statement: ${problemStatement.problem_statement}\nConstraints: ${problemStatement.constraints || 'N/A'}\nExample Input: ${problemStatement.example_input || 'N/A'}\nExample Output: ${problemStatement.example_output || 'N/A'}`;
       }
       
-      const result = await window.electronAPI.getAnswerSuggestions(question, screenshotContext);
+      // Get candidate profile from config
+      const config = await window.electronAPI.getConfig();
+      const candidateProfile = (config as any).candidateProfile;
+      
+      const result = await window.electronAPI.getAnswerSuggestions(question, screenshotContext, candidateProfile);
       if (result.success && result.suggestions) {
         setAiSuggestions(result.suggestions);
       }
@@ -246,6 +265,17 @@ export const ConversationSection: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to toggle speaker:', error);
+    }
+  };
+
+  const toggleSpeakerForNextTurn = async () => {
+    try {
+      const result = await window.electronAPI.toggleSpeaker();
+      if (result.success) {
+        setCurrentSpeaker(result.speaker);
+      }
+    } catch (error) {
+      console.error('Failed to auto-toggle speaker:', error);
     }
   };
 

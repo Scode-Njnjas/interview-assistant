@@ -5,6 +5,12 @@ import { app } from "electron"
 import { EventEmitter } from "events"
 import { OpenAI } from "openai"
 
+export interface CandidateProfile {
+  name?: string;
+  resume?: string;  // Full resume text
+  jobDescription?: string; // Target role/job description
+}
+
 interface Config {
   apiKey: string;
   apiProvider: "openai" | "gemini" | "anthropic";  // Added provider selection
@@ -14,6 +20,7 @@ interface Config {
   speechRecognitionModel: string;  // Speech recognition model (Whisper for OpenAI)
   language: string;
   opacity: number;
+  candidateProfile?: CandidateProfile;  // Candidate profile for personalized AI suggestions
 }
 
 export class ConfigHelper extends EventEmitter {
@@ -26,7 +33,12 @@ export class ConfigHelper extends EventEmitter {
     debuggingModel: "gemini-2.0-flash",
     speechRecognitionModel: "whisper-1", // Default to Whisper for OpenAI
     language: "python",
-    opacity: 1.0
+    opacity: 1.0,
+    candidateProfile: {
+      name: "",
+      resume: "",
+      jobDescription: ""
+    }
   };
 
   constructor() {
