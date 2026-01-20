@@ -4,7 +4,7 @@
  * Uses Dependency Inversion Principle - depends on IConversationManager interface
  */
 import OpenAI from 'openai';
-import { configHelper } from './ConfigHelper';
+import { configHelper, CandidateProfile } from './ConfigHelper';
 import { IConversationManager } from './ConversationManager';
 
 export interface AnswerSuggestion {
@@ -49,7 +49,8 @@ export class AnswerAssistant implements IAnswerAssistant {
   public async generateAnswerSuggestions(
     currentQuestion: string,
     conversationManager: IConversationManager,
-    screenshotContext?: string
+    screenshotContext?: string,
+    candidateProfile?: CandidateProfile
   ): Promise<AnswerSuggestion> {
     if (!this.openai) {
       throw new Error('OpenAI client not initialized. Please set API key.');
@@ -62,11 +63,15 @@ export class AnswerAssistant implements IAnswerAssistant {
     const conversationHistory = conversationManager.getConversationHistory();
     const previousAnswers = conversationManager.getIntervieweeAnswers();
 
+    // Get candidate profile from config if not provided
+    const profile = candidateProfile || configHelper.loadConfig().candidateProfile;
+    
     const contextPrompt = this.buildContextPrompt(
       currentQuestion,
       conversationHistory,
       previousAnswers,
-      screenshotContext
+      screenshotContext,
+      profile
     );
 
     try {
@@ -116,7 +121,8 @@ export class AnswerAssistant implements IAnswerAssistant {
     currentQuestion: string,
     conversationHistory: string,
     previousAnswers: string[],
-    screenshotContext?: string
+    screenshotContext?: string,
+    candidateProfile?: CandidateProfile
   ): string {
     let prompt = `You are an AI assistant helping someone during an interview. 
 The interviewer just asked: "${currentQuestion}"
@@ -126,8 +132,27 @@ ${conversationHistory || 'No previous conversation yet.'}
 
 Previous answers the interviewee has given:
 ${previousAnswers.length > 0 ? previousAnswers.join('\n\n') : 'No previous answers yet.'}
+`;
 
-Based on the current question and conversation history, provide 3-5 bullet point suggestions that:
+    // Add candidate profile context if available
+    if (candidateProfile) {
+      const profileSections: string[] = [];
+      
+      if (candidateProfile.name) {
+        profileSections.push(`Name: ${candidateProfile.name}`);
+      }
+      
+      if (candidateProfile.resume) {
+        profileSections.push(`Resume: ${candidateProfile.resume}`);
+      }
+      
+      if (profileSections.length > 0) {
+        prompt += `\n\nCandidate Profile (use this to personalize suggestions):
+${profileSections.join('\n')}`;
+      }
+    }
+
+    prompt += `\n\nBased on the current question, conversation history${candidateProfile ? ', and candidate profile' : ''}, provide 3-5 bullet point suggestions that:
 1. Directly answer the current question
 2. Reference and build upon previous answers for consistency
 3. Maintain a coherent narrative

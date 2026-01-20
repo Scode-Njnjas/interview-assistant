@@ -12,6 +12,7 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Settings } from "lucide-react";
 import { useToast } from "../../contexts/toast";
+import { CandidateProfileSection, CandidateProfile } from "./CandidateProfileSection";
 
 type APIProvider = "openai" | "gemini" | "anthropic";
 
@@ -185,6 +186,10 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const [solutionModel, setSolutionModel] = useState("gpt-4o");
   const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
   const [speechRecognitionModel, setSpeechRecognitionModel] = useState("whisper-1");
+  const [candidateProfile, setCandidateProfile] = useState<CandidateProfile>({
+    name: "",
+    resume: ""
+  });
   const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
 
@@ -215,6 +220,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         solutionModel?: string;
         debuggingModel?: string;
         speechRecognitionModel?: string;
+        candidateProfile?: CandidateProfile;
       }
 
       window.electronAPI
@@ -226,6 +232,10 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setSolutionModel(config.solutionModel || "gpt-4o");
           setDebuggingModel(config.debuggingModel || "gpt-4o");
           setSpeechRecognitionModel(config.speechRecognitionModel || "whisper-1");
+          setCandidateProfile(config.candidateProfile || {
+            name: "",
+            resume: ""
+          });
         })
         .catch((error: unknown) => {
           console.error("Failed to load config:", error);
@@ -270,6 +280,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         solutionModel,
         debuggingModel,
         speechRecognitionModel,
+        candidateProfile,
       });
       
       if (result) {
@@ -323,12 +334,21 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         }}
       >        
         <DialogHeader>
-          <DialogTitle>API Settings</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="text-white/70">
-            Configure your API key and model preferences. You'll need your own API key to use this application.
+            Configure your API key, AI models, and optional candidate profile. You'll need your own API key to use this application.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
+          {/* API Settings Section */}
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-white">API Settings</h2>
+            <p className="text-xs text-white/60">
+              Choose your provider and models. These control how screenshots and solutions are processed.
+            </p>
+          </div>
+          
+          {/* API Provider Selection */}
           {/* API Provider Selection */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-white">API Provider</label>
@@ -616,6 +636,22 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                 </p>
               </div>
             )}
+          </div>
+          
+          {/* Candidate Profile Section */}
+          <div className="space-y-4 mt-6 border-t border-white/10 pt-4">
+            <div>
+              <label className="text-sm font-medium text-white mb-1 block">
+                Candidate Profile
+              </label>
+              <p className="text-xs text-white/60 mb-3">
+                Add your resume and details to get more personalized AI answer suggestions during interviews.
+              </p>
+              <CandidateProfileSection
+                profile={candidateProfile}
+                onProfileChange={setCandidateProfile}
+              />
+            </div>
           </div>
         </div>
         <DialogFooter className="flex justify-between sm:justify-between">

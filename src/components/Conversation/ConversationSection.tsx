@@ -227,7 +227,11 @@ export const ConversationSection: React.FC = () => {
         screenshotContext = `Problem Statement: ${problemStatement.problem_statement}\nConstraints: ${problemStatement.constraints || 'N/A'}\nExample Input: ${problemStatement.example_input || 'N/A'}\nExample Output: ${problemStatement.example_output || 'N/A'}`;
       }
       
-      const result = await window.electronAPI.getAnswerSuggestions(question, screenshotContext);
+      // Get candidate profile from config
+      const config = await window.electronAPI.getConfig();
+      const candidateProfile = (config as any).candidateProfile;
+      
+      const result = await window.electronAPI.getAnswerSuggestions(question, screenshotContext, candidateProfile);
       if (result.success && result.suggestions) {
         setAiSuggestions(result.suggestions);
       }

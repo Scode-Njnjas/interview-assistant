@@ -441,7 +441,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   })
 
   // AI suggestion handler
-  ipcMain.handle("get-answer-suggestions", async (_event, question: string, screenshotContext?: string) => {
+  ipcMain.handle("get-answer-suggestions", async (_event, question: string, screenshotContext?: string, candidateProfile?: any) => {
     try {
       if (!deps.answerAssistant || !deps.conversationManager) {
         return { success: false, error: "Answer assistant or conversation manager not initialized" };
@@ -450,7 +450,8 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       const suggestions = await deps.answerAssistant.generateAnswerSuggestions(
         question,
         deps.conversationManager,
-        screenshotContext
+        screenshotContext,
+        candidateProfile
       );
       return { success: true, suggestions };
     } catch (error: any) {

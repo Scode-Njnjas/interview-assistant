@@ -205,7 +205,7 @@ const electronAPI = {
   
   // New methods for OpenAI API integration
   getConfig: () => ipcRenderer.invoke("get-config"),
-  updateConfig: (config: { apiKey?: string; model?: string; language?: string; opacity?: number; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string }) => 
+  updateConfig: (config: { apiKey?: string; model?: string; language?: string; opacity?: number; apiProvider?: string; extractionModel?: string; solutionModel?: string; debuggingModel?: string; speechRecognitionModel?: string; candidateProfile?: any }) => 
     ipcRenderer.invoke("update-config", config),
   onShowSettings: (callback: () => void) => {
     const subscription = () => callback()
@@ -256,8 +256,8 @@ const electronAPI = {
     ipcRenderer.invoke("update-conversation-message", messageId, newText),
   
   // AI suggestions
-  getAnswerSuggestions: (question: string, screenshotContext?: string) =>
-    ipcRenderer.invoke("get-answer-suggestions", question, screenshotContext),
+  getAnswerSuggestions: (question: string, screenshotContext?: string, candidateProfile?: any) =>
+    ipcRenderer.invoke("get-answer-suggestions", question, screenshotContext, candidateProfile),
   
   // Event listeners
   onConversationMessageAdded: (callback: (message: any) => void) => {
