@@ -89,7 +89,7 @@ export const ConversationCommands: React.FC<ConversationCommandsProps> = ({
           <div
             className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={onToggleSpeaker}
-            style={{ opacity: (isRecording || isProcessing) ? 0.5 : 1, pointerEvents: (isRecording || isProcessing) ? 'none' : 'auto' }}
+            style={{ opacity: isRecording ? 0.5 : 1, pointerEvents: isRecording ? 'none' : 'auto' }}
           >
             <span className="text-[11px] leading-none">
               {currentSpeaker === 'interviewer' ? 'Interviewer' : 'You'}

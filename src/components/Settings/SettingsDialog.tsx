@@ -188,7 +188,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const [speechRecognitionModel, setSpeechRecognitionModel] = useState("whisper-1");
   const [candidateProfile, setCandidateProfile] = useState<CandidateProfile>({
     name: "",
-    resume: ""
+    resume: "",
+    jobDescription: ""
   });
   const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
@@ -234,7 +235,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setSpeechRecognitionModel(config.speechRecognitionModel || "whisper-1");
           setCandidateProfile(config.candidateProfile || {
             name: "",
-            resume: ""
+            resume: "",
+            jobDescription: ""
           });
         })
         .catch((error: unknown) => {

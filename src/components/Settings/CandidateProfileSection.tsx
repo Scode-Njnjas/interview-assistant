@@ -9,6 +9,7 @@ import { Button } from '../ui/button';
 export interface CandidateProfile {
   name?: string;
   resume?: string;
+  jobDescription?: string;
 }
 
 interface CandidateProfileSectionProps {
@@ -52,6 +53,20 @@ export const CandidateProfileSection: React.FC<CandidateProfileSectionProps> = (
         />
         <p className="text-xs text-white/60">
           Include your work experience, education, skills, and achievements. The more detail, the better the AI suggestions.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-white">Job Description</label>
+        <textarea
+          value={localProfile.jobDescription || ''}
+          onChange={(e) => handleFieldChange('jobDescription', e.target.value)}
+          placeholder="Paste the target job description or role requirements."
+          rows={4}
+          className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-md text-white text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20 resize-y"
+        />
+        <p className="text-xs text-white/60">
+          This is used to tailor suggestions to the target role.
         </p>
       </div>
     </div>

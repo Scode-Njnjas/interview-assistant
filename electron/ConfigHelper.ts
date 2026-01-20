@@ -8,6 +8,7 @@ import { OpenAI } from "openai"
 export interface CandidateProfile {
   name?: string;
   resume?: string;  // Full resume text
+  jobDescription?: string; // Target role/job description
 }
 
 interface Config {
@@ -35,7 +36,8 @@ export class ConfigHelper extends EventEmitter {
     opacity: 1.0,
     candidateProfile: {
       name: "",
-      resume: ""
+      resume: "",
+      jobDescription: ""
     }
   };
 
