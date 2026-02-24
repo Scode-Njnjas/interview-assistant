@@ -10,9 +10,11 @@
     "start": "cross-env NODE_ENV=development concurrently \"tsc -p tsconfig.electron.json\" \"vite\" \"wait-on -t 30000 http://localhost:54321 && electron ./dist-electron/main.js\"",
     "build": "cross-env NODE_ENV=production npm run clean && vite build && tsc -p tsconfig.electron.json",
     "run-prod": "cross-env NODE_ENV=production electron ./dist-electron/main.js",
+    "typecheck": "tsc --noEmit",
     "package": "npm run build && electron-builder build",
     "package-mac": "npm run build && electron-builder build --mac",
-    "package-win": "npm run build && electron-builder build --win"
+    "package-win": "npm run build && electron-builder build --win",
+    "package-linux": "npm run build && electron-builder build --linux"
   },
   "build": {
     "appId": "com.scodenjnjas.interviewassistant",
@@ -48,14 +50,14 @@
           ]
         }
       ],
-      "artifactName": "Interview-Coder-${arch}.${ext}",
+      "artifactName": "${productName}-${arch}.${ext}",
       "icon": "assets/icons/mac/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "identity": "Developer ID Application",
-      "notarize": true,
+      "identity": null,
+      "notarize": false,
       "protocols": {
         "name": "interview-assistant-protocol",
         "schemes": [
@@ -78,7 +80,9 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb",
+        "rpm"
       ],
       "icon": "assets/icons/png/icon-256x256.png",
       "artifactName": "${productName}-Linux-${version}.${ext}",
@@ -95,18 +99,10 @@
         "owner": "Scode-Njnjas",
         "repo": "interview-assistant",
         "private": false,
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
-    "extraResources": [
-      {
-        "from": ".env",
-        "to": ".env",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
+    "afterSign": "scripts/notarize.js",
     "extraMetadata": {
       "main": "dist-electron/main.js"
     }

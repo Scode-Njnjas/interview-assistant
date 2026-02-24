@@ -5,43 +5,98 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 jobs:
-  build-and-test:
-    name: Build and Test on ${{ matrix.os }}
+  # ─── Fast checks (lint + typecheck) ───────────────────────
+  quality:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Type check
+        run: npm run typecheck
+        continue-on-error: true
+
+  # ─── Build on all platforms ───────────────────────────────
+  build:
+    name: Build (${{ matrix.name }})
+    needs: quality
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - name: macOS-arm64
+            os: macos-14
+          - name: macOS-x64
+            os: macos-13
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-22.04
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: 'npm'
-      
-    - name: Install dependencies
-      run: npm i
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
-    - name: Clearing previous builds
-      run: npm run clean
-      
-    - name: Run Linter
-      run: npm run lint
-      continue-on-error: true
+      # ── Electron binary cache (biggest time saver: 100-400MB) ──
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_CACHE }}
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-${{ runner.arch }}-
 
-    - name: Type Check
-      run: npx tsc --noEmit
-      continue-on-error: true
+      # ── electron-builder tools cache (nsis, fpm, etc.) ──
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: eb-tools-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: eb-tools-${{ runner.os }}-
 
-    - name: Build
-      run: npm run build
+      # ── Linux system dependencies ──
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxkbfile-dev libsecret-1-dev libudev-dev libxtst-dev
 
-    - name: Run Tests
-      run: npm test
+      - name: Install dependencies
+        run: npm ci
 
+      # ── Vite + TypeScript build ──
+      - name: Build application
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Test
+        run: npm test

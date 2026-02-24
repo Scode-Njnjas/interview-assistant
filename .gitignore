@@ -7,8 +7,7 @@ dist
 **/.DS_Store
 **/.vscode
 **/.idea
-scripts/
-**/scripts/
+# Keep scripts/notarize.js but ignore other generated scripts
 scripts/manual-notarize.js
 
 # AI agent configs and reports
