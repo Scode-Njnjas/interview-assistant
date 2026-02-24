@@ -49,14 +49,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS-arm64
-            os: macos-14
-          - name: macOS-x64
-            os: macos-13
+          - name: macOS
+            os: macos-latest
           - name: Windows
             os: windows-latest
           - name: Linux
-            os: ubuntu-22.04
+            os: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4

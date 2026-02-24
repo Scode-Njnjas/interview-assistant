@@ -6,7 +6,7 @@
 
 import { OpenAI } from "openai";
 import * as axios from "axios";
-import { APIProvider, FetchedModel, ModelPricing, ALLOWED_MODELS } from "../shared/aiModels";
+import { APIProvider, FetchedModel, ALLOWED_MODELS } from "../shared/aiModels";
 
 export interface ModelFetchResult {
   success: boolean;
