@@ -51,13 +51,13 @@ jobs:
         include:
           - name: macOS
             os: macos-latest
-            build_cmd: npx electron-builder build --mac --arm64 --x64
+            build_cmd: npx electron-builder build --mac --arm64 --x64 --publish never
           - name: Windows
             os: windows-latest
-            build_cmd: npx electron-builder build --win
+            build_cmd: npx electron-builder build --win --publish never
           - name: Linux
             os: ubuntu-latest
-            build_cmd: npx electron-builder build --linux
+            build_cmd: npx electron-builder build --linux --publish never
 
     steps:
       - uses: actions/checkout@v4
