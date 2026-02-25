@@ -114,7 +114,10 @@
     "technical interview",
     "tool"
   ],
-  "author": "Interview Assistant Contributors",
+  "author": {
+    "name": "Interview Assistant Contributors",
+    "email": "minhvo.work@gmail.com"
+  },
   "license": "AGPL-3.0-or-later",
   "description": "An invisible desktop application to help you pass your technical interviews.",
   "dependencies": {
