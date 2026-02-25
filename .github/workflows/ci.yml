@@ -138,8 +138,7 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.rpm
-            release/*.yml
-            release/*.yaml
+            release/latest*.yml
           retention-days: 30
           if-no-files-found: warn
 
@@ -185,5 +184,4 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/**/*.deb
             artifacts/**/*.rpm
-            artifacts/**/*.yml
-            artifacts/**/*.yaml
+            artifacts/**/latest*.yml
