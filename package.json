@@ -1,6 +1,6 @@
 {
   "name": "interview-assistant",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "main": "./dist-electron/main.js",
   "scripts": {
     "clean": "npx rimraf dist dist-electron",
@@ -99,7 +99,7 @@
         "owner": "Scode-Njnjas",
         "repo": "interview-assistant",
         "private": false,
-        "releaseType": "draft"
+        "releaseType": "release"
       }
     ],
     "afterSign": "scripts/notarize.js",

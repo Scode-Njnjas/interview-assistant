@@ -112,11 +112,12 @@ jobs:
           mkdir -p ~/.private_keys
           echo "$APPLE_API_KEY_BASE64" | base64 --decode > ~/.private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
 
-      # ── Package the electron app (unsigned — no CSC_LINK/WIN_CSC_LINK to avoid empty-string errors) ──
+      # ── Package the electron app ──
+      # CSC_IDENTITY_AUTO_DISCOVERY=false skips code signing (no certs in CI)
+      # No GH_TOKEN here — prevents electron-builder from auto-publishing
       - name: Package electron app
         run: ${{ matrix.build_cmd }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       # ── List output for debugging ──
