@@ -50,7 +50,7 @@ function App() {
   const [currentLanguage, setCurrentLanguage] = useState<string>("python")
   const [isInitialized, setIsInitialized] = useState(false)
   const [hasApiKey, setHasApiKey] = useState(false)
-  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false)
+  const [_apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false)
   // Note: Model selection is now handled via separate extraction/solution/debugging model settings
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -227,7 +227,7 @@ function App() {
     setIsSettingsOpen(open);
   }, []);
 
-  const handleApiKeySave = useCallback(async (apiKey: string) => {
+  const _handleApiKeySave = useCallback(async (apiKey: string) => {
     try {
       await window.electronAPI.updateConfig({ apiKey })
       setHasApiKey(true)

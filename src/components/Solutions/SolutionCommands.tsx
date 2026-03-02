@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react"
 import { useToast } from "../../contexts/toast"
 import { Screenshot } from "../../types/screenshots"
-import { supabase } from "../../lib/supabase"
 import { LanguageSelector } from "../shared/LanguageSelector"
 import { COMMAND_KEY } from "../../utils/platform"
 
@@ -15,15 +14,10 @@ export interface SolutionCommandsProps {
   setLanguage: (language: string) => void
 }
 
-const handleSignOut = async () => {
+const handleSignOut = () => {
   try {
-    // Clear any local storage or electron-specific data first
     localStorage.clear()
     sessionStorage.clear()
-
-    // Then sign out from Supabase
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
   } catch (err) {
     console.error("Error signing out:", err)
   }
@@ -33,7 +27,6 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   onTooltipVisibilityChange,
   isProcessing,
   extraScreenshots = [],
-  credits,
   currentLanguage,
   setLanguage
 }) => {

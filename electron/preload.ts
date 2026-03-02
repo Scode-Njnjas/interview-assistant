@@ -1,6 +1,5 @@
 console.log("Preload script starting...")
-import { contextBridge, ipcRenderer } from "electron"
-const { shell } = require("electron")
+import { contextBridge, ipcRenderer, shell } from "electron"
 
 export const PROCESSING_EVENTS = {
   //global states

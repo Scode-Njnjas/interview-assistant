@@ -9,11 +9,7 @@ export interface ElectronAPI {
     height: number
   }) => Promise<void>
   clearStore: () => Promise<{ success: boolean; error?: string }>
-  getScreenshots: () => Promise<{
-    success: boolean
-    previews?: Array<{ path: string; preview: string }> | null
-    error?: string
-  }>
+  getScreenshots: () => Promise<Array<{ path: string; preview: string }>>
   deleteScreenshot: (
     path: string
   ) => Promise<{ success: boolean; error?: string }>
@@ -79,7 +75,10 @@ export interface ElectronAPI {
   openLink: (url: string) => void
   onApiKeyInvalid: (callback: () => void) => () => void
   removeListener: (eventName: string, callback: (...args: any[]) => void) => void
-  
+  onShowSettings: (callback: () => void) => () => void
+  onDeleteLastScreenshot: (callback: () => void) => () => void
+  deleteLastScreenshot: () => Promise<any>
+
   // Conversation & Transcription methods
   transcribeAudio: (audioBuffer: ArrayBuffer, mimeType: string) => Promise<{ success: boolean; result?: { text: string; language?: string }; error?: string }>
   addConversationMessage: (text: string, speaker?: string) => Promise<{ success: boolean; message?: any; error?: string }>

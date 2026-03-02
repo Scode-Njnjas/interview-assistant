@@ -1,48 +1,22 @@
 // ProcessingHelper.ts
 import fs from "node:fs"
-import path from "node:path"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { IProcessingHelperDeps } from "./main"
-import * as axios from "axios"
-import { app, BrowserWindow, dialog } from "electron"
+import { generateText } from "ai";
+import { BrowserWindow } from "electron"
 import { configHelper } from "./ConfigHelper"
-import {
-  APIProvider,
-  getModelParams,
-} from "../shared/aiModels";
-import { ProviderClient, createProviderClient, isOpenAICompatible } from './ProviderClientFactory';
+import { APIProvider, isNewerModel } from "../shared/aiModels";
+import { AIModelFactory, createModelFactory } from './ProviderClientFactory';
 
-// Interface for Gemini API requests
-interface GeminiMessage {
-  role: string;
-  parts: Array<{
-    text?: string;
-    inlineData?: {
-      mimeType: string;
-      data: string;
-    }
-  }>;
-}
-
-interface GeminiResponse {
-  candidates: Array<{
-    content: {
-      parts: Array<{
-        text: string;
-      }>;
-    };
-    finishReason: string;
-  }>;
-}
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps
   private screenshotHelper: ScreenshotHelper
-  private providerClient: ProviderClient | null = null
+  private modelFactory: AIModelFactory | null = null
 
   // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null
   private currentExtraProcessingAbortController: AbortController | null = null
-  
+
   private formatProviderError(provider: string, error: any, context: string): string {
     const status =
       typeof error?.status === "number"
@@ -57,11 +31,11 @@ export class ProcessingHelper {
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
-    this.screenshotHelper = deps.getScreenshotHelper()
-    
+    this.screenshotHelper = deps.getScreenshotHelper()!
+
     // Initialize AI client based on config
     this.initializeAIClient();
-    
+
     // Listen for config changes to re-initialize the AI client
     configHelper.on('config-updated', () => {
       this.initializeAIClient();
@@ -83,21 +57,21 @@ export class ProcessingHelper {
     }
     return null;
   }
-  
+
   /**
    * Initialize or reinitialize the AI client with current config
    */
   private initializeAIClient(): void {
     try {
-      this.providerClient = createProviderClient();
-      if (this.providerClient) {
-        console.log(`${this.providerClient.type} client initialized successfully`);
+      this.modelFactory = createModelFactory();
+      if (this.modelFactory) {
+        console.log("AI SDK model factory initialized successfully");
       } else {
-        console.warn("No provider client initialized (missing API key?)");
+        console.warn("No model factory initialized (missing API key?)");
       }
     } catch (error) {
       console.error("Failed to initialize AI client:", error);
-      this.providerClient = null;
+      this.modelFactory = null;
     }
   }
 
@@ -138,7 +112,7 @@ export class ProcessingHelper {
       if (config.language) {
         return config.language;
       }
-      
+
       // Fallback to window variable if config doesn't have language
       const mainWindow = this.deps.getMainWindow()
       if (mainWindow) {
@@ -159,7 +133,7 @@ export class ProcessingHelper {
           console.warn("Could not get language from window", err);
         }
       }
-      
+
       // Default fallback
       return "python";
     } catch (error) {
@@ -172,13 +146,11 @@ export class ProcessingHelper {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
 
-    const config = configHelper.loadConfig();
-    
     // First verify we have a valid AI client
-    if (!this.providerClient) {
+    if (!this.modelFactory) {
       this.initializeAIClient();
 
-      if (!this.providerClient) {
+      if (!this.modelFactory) {
         console.error("AI client not initialized");
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.API_KEY_INVALID
@@ -194,7 +166,7 @@ export class ProcessingHelper {
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
       const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
       console.log("Processing main queue screenshots:", screenshotQueue)
-      
+
       // Check if the queue is empty
       if (!screenshotQueue || screenshotQueue.length === 0) {
         console.log("No screenshots found in queue");
@@ -231,8 +203,8 @@ export class ProcessingHelper {
         )
 
         // Filter out any nulls from failed screenshots
-        const validScreenshots = screenshots.filter(Boolean);
-        
+        const validScreenshots = screenshots.filter(Boolean) as Array<{ path: string; preview: string; data: string }>;
+
         if (validScreenshots.length === 0) {
           throw new Error("Failed to load screenshot data");
         }
@@ -270,7 +242,7 @@ export class ProcessingHelper {
           error
         )
         console.error("Processing error:", error)
-        if (axios.isCancel(error)) {
+        if (error?.name === 'AbortError') {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
             "Processing was canceled by the user."
@@ -292,12 +264,12 @@ export class ProcessingHelper {
       const extraScreenshotQueue =
         this.screenshotHelper.getExtraScreenshotQueue()
       console.log("Processing extra queue screenshots:", extraScreenshotQueue)
-      
+
       // Check if the extra queue is empty
       if (!extraScreenshotQueue || extraScreenshotQueue.length === 0) {
         console.log("No extra screenshots found in queue");
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
-        
+
         return;
       }
 
@@ -308,7 +280,7 @@ export class ProcessingHelper {
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
         return;
       }
-      
+
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.DEBUG_START)
 
       // Initialize AbortController
@@ -321,7 +293,7 @@ export class ProcessingHelper {
           ...this.screenshotHelper.getScreenshotQueue(),
           ...existingExtraScreenshots
         ];
-        
+
         const screenshots = await Promise.all(
           allPaths.map(async (path) => {
             try {
@@ -329,7 +301,7 @@ export class ProcessingHelper {
                 console.warn(`Screenshot file does not exist: ${path}`);
                 return null;
               }
-              
+
               return {
                 path,
                 preview: await this.screenshotHelper.getImagePreview(path),
@@ -341,17 +313,17 @@ export class ProcessingHelper {
             }
           })
         )
-        
+
         // Filter out any nulls from failed screenshots
-        const validScreenshots = screenshots.filter(Boolean);
-        
+        const validScreenshots = screenshots.filter(Boolean) as Array<{ path: string; preview: string; data: string }>;
+
         if (validScreenshots.length === 0) {
           throw new Error("Failed to load screenshot data for debugging");
         }
-        
+
         console.log(
           "Combined screenshots for processing:",
-          validScreenshots.map((s) => s.path)
+          validScreenshots.map((s) => s!.path)
         )
 
         const result = await this.processExtraScreenshotsHelper(
@@ -372,7 +344,7 @@ export class ProcessingHelper {
           )
         }
       } catch (error: any) {
-        if (axios.isCancel(error)) {
+        if (error?.name === 'AbortError') {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
             "Extra processing was canceled by the user."
@@ -397,10 +369,10 @@ export class ProcessingHelper {
       const config = configHelper.loadConfig();
       const language = await this.getLanguage();
       const mainWindow = this.deps.getMainWindow();
-      
-      // Step 1: Extract problem info using AI Vision API (OpenAI or Gemini)
+
+      // Step 1: Extract problem info using AI Vision API
       const imageDataList = screenshots.map(screenshot => screenshot.data);
-      
+
       // Update the user on progress
       if (mainWindow) {
         mainWindow.webContents.send("processing-status", {
@@ -411,193 +383,57 @@ export class ProcessingHelper {
 
       let problemInfo;
 
-      if (!this.providerClient) {
+      if (!this.modelFactory) {
         throw new Error("AI client not initialized");
       }
 
-      if (isOpenAICompatible(this.providerClient)) {
-        const openaiClient = this.providerClient.client;
+      // Get conversation context if available
+      const conversationContext = this.getConversationContext();
 
-        // Get conversation context if available
-        const conversationContext = this.getConversationContext();
+      const extractionFields = "problem_statement, constraints, example_input, example_output, original_code";
+      const systemPrompt = conversationContext
+        ? `You are a coding challenge interpreter. Analyze the screenshot of the coding problem and extract all relevant information. Consider the conversation context provided. Return the information in JSON format with these fields: ${extractionFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text.`
+        : `You are a coding challenge interpreter. Analyze the screenshot of the coding problem and extract all relevant information. Return the information in JSON format with these fields: ${extractionFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text.`;
 
-        // Use OpenAI-compatible API for processing
-        const extractionFields = "problem_statement, constraints, example_input, example_output, original_code";
-        const systemPrompt = conversationContext
-          ? `You are a coding challenge interpreter. Analyze the screenshot of the coding problem and extract all relevant information. Consider the conversation context provided. Return the information in JSON format with these fields: ${extractionFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text.`
-          : `You are a coding challenge interpreter. Analyze the screenshot of the coding problem and extract all relevant information. Return the information in JSON format with these fields: ${extractionFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text.`;
+      const userPrompt = conversationContext
+        ? `Extract the coding problem details from these screenshots. Consider the following conversation context:\n\n${conversationContext}\n\nReturn in JSON format. Preferred coding language we gonna use for this problem is ${language}. IMPORTANT: Include any code template or function signature visible in the screenshots in the original_code field.`
+        : `Extract the coding problem details from these screenshots. Return in JSON format. Preferred coding language we gonna use for this problem is ${language}. IMPORTANT: Include any code template or function signature visible in the screenshots in the original_code field.`;
 
-        const userPrompt = conversationContext
-          ? `Extract the coding problem details from these screenshots. Consider the following conversation context:\n\n${conversationContext}\n\nReturn in JSON format. Preferred coding language we gonna use for this problem is ${language}. IMPORTANT: Include any code template or function signature visible in the screenshots in the original_code field.`
-          : `Extract the coding problem details from these screenshots. Return in JSON format. Preferred coding language we gonna use for this problem is ${language}. IMPORTANT: Include any code template or function signature visible in the screenshots in the original_code field.`;
+      const extractionModelId = config.extractionModel || "gpt-4o";
+      const tempOpts = isNewerModel(extractionModelId) ? {} : { temperature: 0.2 };
 
-        const messages = [
+      const { text: extractionText } = await generateText({
+        model: this.modelFactory(extractionModelId),
+        messages: [
+          { role: "system", content: systemPrompt },
           {
-            role: "system" as const,
-            content: systemPrompt
-          },
-          {
-            role: "user" as const,
+            role: "user",
             content: [
-              {
-                type: "text" as const,
-                text: userPrompt
-              },
-              ...imageDataList.map(data => ({
-                type: "image_url" as const,
-                image_url: { url: `data:image/png;base64,${data}` }
-              }))
-            ]
-          }
-        ];
+              { type: "text", text: userPrompt },
+              ...imageDataList.map((data) => ({
+                type: "image" as const,
+                image: `data:image/png;base64,${data}`,
+              })),
+            ],
+          },
+        ],
+        maxOutputTokens: 4000,
+        ...tempOpts,
+        abortSignal: signal,
+      });
 
-        // Send to OpenAI-compatible Vision API
-        const extractionModel = config.extractionModel || "gpt-4o";
-        const extractionResponse = await openaiClient.chat.completions.create({
-          model: extractionModel,
-          messages: messages,
-          ...getModelParams(extractionModel, { maxTokens: 4000, temperature: 0.2 }),
-        });
-
-        // Parse the response
-        try {
-          const responseText = extractionResponse.choices[0].message.content;
-          // Handle when the API might wrap the JSON in markdown code blocks
-          const jsonText = responseText.replace(/```json|```/g, '').trim();
-          problemInfo = JSON.parse(jsonText);
-        } catch (error) {
-          console.error("Error parsing OpenAI-compatible response:", error);
-          return {
-            success: false,
-            error: "Failed to parse problem information. Please try again or use clearer screenshots."
-          };
-        }
-      } else if (this.providerClient.type === "gemini") {
-        const geminiApiKey = this.providerClient.apiKey;
-
-        try {
-          // Get conversation context if available
-          const conversationContext = this.getConversationContext();
-
-          const geminiFields = "problem_statement, constraints, example_input, example_output, original_code";
-          const geminiPrompt = conversationContext
-            ? `You are a coding challenge interpreter. Analyze the screenshots of the coding problem and extract all relevant information. Consider the following conversation context:\n\n${conversationContext}\n\nReturn the information in JSON format with these fields: ${geminiFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text. Preferred coding language we gonna use for this problem is ${language}.`
-            : `You are a coding challenge interpreter. Analyze the screenshots of the coding problem and extract all relevant information. Return the information in JSON format with these fields: ${geminiFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Just return the structured JSON without any other text. Preferred coding language we gonna use for this problem is ${language}.`;
-
-          // Create Gemini message structure
-          const geminiMessages: GeminiMessage[] = [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: geminiPrompt
-                },
-                ...imageDataList.map(data => ({
-                  inlineData: {
-                    mimeType: "image/png",
-                    data: data
-                  }
-                }))
-              ]
-            }
-          ];
-
-          // Make API request to Gemini
-          const response = await axios.default.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/${config.extractionModel || "gemini-3-flash-latest"}:generateContent?key=${geminiApiKey}`,
-            {
-              contents: geminiMessages,
-              generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 4000
-              }
-            },
-            { signal }
-          );
-
-          const responseData = response.data as GeminiResponse;
-
-          if (!responseData.candidates || responseData.candidates.length === 0) {
-            throw new Error("Empty response from Gemini API");
-          }
-
-          const responseText = responseData.candidates[0].content.parts[0].text;
-
-          // Handle when Gemini might wrap the JSON in markdown code blocks
-          const jsonText = responseText.replace(/```json|```/g, '').trim();
-          problemInfo = JSON.parse(jsonText);
-        } catch (error) {
-          console.error("Error using Gemini API:", error);
-          return {
-            success: false,
-            error: this.formatProviderError("gemini", error, "Problem extraction")
-          };
-        }
-      } else if (this.providerClient.type === "anthropic") {
-        const anthropicClient = this.providerClient.client;
-
-        try {
-          // Get conversation context if available
-          const conversationContext = this.getConversationContext();
-
-          const anthropicFields = "problem_statement, constraints, example_input, example_output, original_code";
-          const anthropicPrompt = conversationContext
-            ? `Extract the coding problem details from these screenshots. Consider the following conversation context:\n\n${conversationContext}\n\nReturn in JSON format with these fields: ${anthropicFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Preferred coding language is ${language}.`
-            : `Extract the coding problem details from these screenshots. Return in JSON format with these fields: ${anthropicFields}. The original_code field should contain any code template, function signature, or boilerplate code visible in the screenshot exactly as shown. Preferred coding language is ${language}.`;
-
-          const messages = [
-            {
-              role: "user" as const,
-              content: [
-                {
-                  type: "text" as const,
-                  text: anthropicPrompt
-                },
-                ...imageDataList.map(data => ({
-                  type: "image" as const,
-                  source: {
-                    type: "base64" as const,
-                    media_type: "image/png" as const,
-                    data: data
-                  }
-                }))
-              ]
-            }
-          ];
-
-          const response = await anthropicClient.messages.create({
-            model: config.extractionModel || "claude-3-7-sonnet-20250219",
-            max_tokens: 4000,
-            messages: messages,
-            temperature: 0.2
-          });
-
-          const responseText = (response.content[0] as { type: 'text', text: string }).text;
-          const jsonText = responseText.replace(/```json|```/g, '').trim();
-          problemInfo = JSON.parse(jsonText);
-        } catch (error: any) {
-          console.error("Error using Anthropic API:", error);
-
-          // Add specific handling for Claude's limitations
-          if (error.status === 429) {
-            return {
-              success: false,
-              error: "Claude API rate limit exceeded. Please wait a few minutes before trying again."
-            };
-          } else if (error.status === 413 || (error.message && error.message.includes("token"))) {
-            return {
-              success: false,
-              error: "Your screenshots contain too much information for Claude to process. Switch to OpenAI or Gemini in settings which can handle larger inputs."
-            };
-          }
-
-          return {
-            success: false,
-            error: this.formatProviderError("anthropic", error, "Problem extraction")
-          };
-        }
+      // Parse the response
+      try {
+        const jsonText = extractionText.replace(/```json|```/g, "").trim();
+        problemInfo = JSON.parse(jsonText);
+      } catch (error) {
+        console.error("Error parsing extraction response:", error);
+        return {
+          success: false,
+          error: "Failed to parse problem information. Please try again or use clearer screenshots.",
+        };
       }
-      
+
       // Update the user on progress
       if (mainWindow) {
         mainWindow.webContents.send("processing-status", {
@@ -621,13 +457,13 @@ export class ProcessingHelper {
         if (solutionsResult.success) {
           // Clear any existing extra screenshots before transitioning to solutions view
           this.screenshotHelper.clearExtraScreenshotQueue();
-          
+
           // Final progress update
           mainWindow.webContents.send("processing-status", {
             message: "Solution generated successfully",
             progress: 100
           });
-          
+
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
             solutionsResult.data
@@ -643,13 +479,13 @@ export class ProcessingHelper {
       return { success: false, error: "Failed to process screenshots" };
     } catch (error: any) {
       // If the request was cancelled, don't retry
-      if (axios.isCancel(error)) {
+      if (error?.name === 'AbortError') {
         return {
           success: false,
           error: "Processing was canceled by the user."
         };
       }
-      
+
       const config = configHelper.loadConfig();
       const provider: APIProvider = config.apiProvider;
 
@@ -672,8 +508,8 @@ export class ProcessingHelper {
       }
 
       console.error("API Error Details:", error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: this.formatProviderError(provider, error, "Processing screenshots")
       };
     }
@@ -739,132 +575,38 @@ For complexity explanations, please be thorough. For example: "Time complexity: 
 Your solution should be efficient, well-commented, and handle edge cases.
 `;
 
-      let responseContent;
-
-      if (!this.providerClient) {
+      if (!this.modelFactory) {
         throw new Error("AI client not initialized");
       }
 
-      if (isOpenAICompatible(this.providerClient)) {
-        const openaiClient = this.providerClient.client;
+      const solutionModelId = config.solutionModel || "gpt-4o";
+      const tempOpts = isNewerModel(solutionModelId) ? {} : { temperature: 0.2 };
 
-        // Send to OpenAI-compatible API
-        const solutionModelId = config.solutionModel || "gpt-4o";
-        const solutionResponse = await openaiClient.chat.completions.create({
-          model: solutionModelId,
-          messages: [
-            { role: "system", content: "You are an expert coding interview assistant. Provide clear, optimal solutions with detailed explanations." },
-            { role: "user", content: promptText }
-          ],
-          ...getModelParams(solutionModelId, { maxTokens: 4000, temperature: 0.2 }),
-        });
+      const { text: solutionText } = await generateText({
+        model: this.modelFactory(solutionModelId),
+        system: "You are an expert coding interview assistant. Provide clear, optimal solutions with detailed explanations.",
+        prompt: promptText,
+        maxOutputTokens: 4000,
+        ...tempOpts,
+        abortSignal: signal,
+      });
 
-        responseContent = solutionResponse.choices[0].message.content;
-      } else if (this.providerClient.type === "gemini") {
-        const geminiApiKey = this.providerClient.apiKey;
+      const responseContent: string = solutionText;
 
-        try {
-          // Create Gemini message structure
-          const geminiMessages = [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `You are an expert coding interview assistant. Provide a clear, optimal solution with detailed explanations for this problem:\n\n${promptText}`
-                }
-              ]
-            }
-          ];
-
-          // Make API request to Gemini
-          const response = await axios.default.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/${config.solutionModel || "gemini-3-flash-latest"}:generateContent?key=${geminiApiKey}`,
-            {
-              contents: geminiMessages,
-              generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 4000
-              }
-            },
-            { signal }
-          );
-
-          const responseData = response.data as GeminiResponse;
-
-          if (!responseData.candidates || responseData.candidates.length === 0) {
-            throw new Error("Empty response from Gemini API");
-          }
-
-          responseContent = responseData.candidates[0].content.parts[0].text;
-        } catch (error) {
-          console.error("Error using Gemini API for solution:", error);
-          return {
-            success: false,
-            error: this.formatProviderError("gemini", error, "Solution generation")
-          };
-        }
-      } else if (this.providerClient.type === "anthropic") {
-        const anthropicClient = this.providerClient.client;
-
-        try {
-          const messages = [
-            {
-              role: "user" as const,
-              content: [
-                {
-                  type: "text" as const,
-                  text: `You are an expert coding interview assistant. Provide a clear, optimal solution with detailed explanations for this problem:\n\n${promptText}`
-                }
-              ]
-            }
-          ];
-
-          // Send to Anthropic API
-          const response = await anthropicClient.messages.create({
-            model: config.solutionModel || "claude-3-7-sonnet-20250219",
-            max_tokens: 4000,
-            messages: messages,
-            temperature: 0.2
-          });
-
-          responseContent = (response.content[0] as { type: 'text', text: string }).text;
-        } catch (error: any) {
-          console.error("Error using Anthropic API for solution:", error);
-
-          // Add specific handling for Claude's limitations
-          if (error.status === 429) {
-            return {
-              success: false,
-              error: "Claude API rate limit exceeded. Please wait a few minutes before trying again."
-            };
-          } else if (error.status === 413 || (error.message && error.message.includes("token"))) {
-            return {
-              success: false,
-              error: "Your screenshots contain too much information for Claude to process. Switch to OpenAI or Gemini in settings which can handle larger inputs."
-            };
-          }
-
-          return {
-            success: false,
-            error: this.formatProviderError("anthropic", error, "Solution generation")
-          };
-        }
-      }
-      
       // Extract parts from the response
       const codeMatch = responseContent.match(/```(?:\w+)?\s*([\s\S]*?)```/);
       const code = codeMatch ? codeMatch[1].trim() : responseContent;
-      
+
       // Extract thoughts, looking for bullet points or numbered lists
       const thoughtsRegex = /(?:Thoughts:|Key Insights:|Reasoning:|Approach:)([\s\S]*?)(?:Time complexity:|$)/i;
       const thoughtsMatch = responseContent.match(thoughtsRegex);
       let thoughts: string[] = [];
-      
+
       if (thoughtsMatch && thoughtsMatch[1]) {
         // Extract bullet points or numbered items
         const bulletPoints = thoughtsMatch[1].match(/(?:^|\n)\s*(?:[-*•]|\d+\.)\s*(.*)/g);
         if (bulletPoints) {
-          thoughts = bulletPoints.map(point => 
+          thoughts = bulletPoints.map(point =>
             point.replace(/^\s*(?:[-*•]|\d+\.)\s*/, '').trim()
           ).filter(Boolean);
         } else {
@@ -874,14 +616,14 @@ Your solution should be efficient, well-commented, and handle edge cases.
             .filter(Boolean);
         }
       }
-      
+
       // Extract complexity information
       const timeComplexityPattern = /Time complexity:?\s*([^\n]+(?:\n[^\n]+)*?)(?=\n\s*(?:Space complexity|$))/i;
       const spaceComplexityPattern = /Space complexity:?\s*([^\n]+(?:\n[^\n]+)*?)(?=\n\s*(?:[A-Z]|$))/i;
-      
+
       let timeComplexity = "O(n) - Linear time complexity because we only iterate through the array once. Each element is processed exactly one time, and the hashmap lookups are O(1) operations.";
       let spaceComplexity = "O(n) - Linear space complexity because we store elements in the hashmap. In the worst case, we might need to store all elements before finding the solution pair.";
-      
+
       const timeMatch = responseContent.match(timeComplexityPattern);
       if (timeMatch && timeMatch[1]) {
         timeComplexity = timeMatch[1].trim();
@@ -896,7 +638,7 @@ Your solution should be efficient, well-commented, and handle edge cases.
           }
         }
       }
-      
+
       const spaceMatch = responseContent.match(spaceComplexityPattern);
       if (spaceMatch && spaceMatch[1]) {
         spaceComplexity = spaceMatch[1].trim();
@@ -921,13 +663,13 @@ Your solution should be efficient, well-commented, and handle edge cases.
 
       return { success: true, data: formattedResponse };
     } catch (error: any) {
-      if (axios.isCancel(error)) {
+      if (error?.name === 'AbortError') {
         return {
           success: false,
           error: "Processing was canceled by the user."
         };
       }
-      
+
       if (error?.response?.status === 401) {
         return {
           success: false,
@@ -939,7 +681,7 @@ Your solution should be efficient, well-commented, and handle edge cases.
           error: this.formatProviderError(configHelper.loadConfig().apiProvider, error, "Rate limit / quota")
         };
       }
-      
+
       console.error("Solution generation error:", error);
       return { success: false, error: this.formatProviderError(configHelper.loadConfig().apiProvider, error, "Solution generation") };
     }
@@ -969,20 +711,14 @@ Your solution should be efficient, well-commented, and handle edge cases.
 
       // Prepare the images for the API call
       const imageDataList = screenshots.map(screenshot => screenshot.data);
-      
-      let debugContent;
 
-      if (!this.providerClient) {
+      let debugContent: string;
+
+      if (!this.modelFactory) {
         throw new Error("AI client not initialized");
       }
 
-      if (isOpenAICompatible(this.providerClient)) {
-        const openaiClient = this.providerClient.client;
-
-        const messages = [
-          {
-            role: "system" as const,
-            content: `You are a coding interview assistant helping debug and improve solutions. Analyze these screenshots which include either error messages, incorrect outputs, or test cases, and provide detailed debugging help.
+      const systemPrompt = `You are a coding interview assistant helping debug and improve solutions. Analyze these screenshots which include either error messages, incorrect outputs, or test cases, and provide detailed debugging help.
 
 Your response MUST follow this exact structure with these section headers (use ### for headers):
 ### Issues Identified
@@ -1000,205 +736,46 @@ Here provide a clear explanation of why the changes are needed
 ### Key Points
 - Summary bullet points of the most important takeaways
 
-If you include code examples, use proper markdown code blocks with language specification (e.g. \`\`\`java).`
-          },
-          {
-            role: "user" as const,
-            content: [
-              {
-                type: "text" as const,
-                text: `I'm solving this coding problem: "${problemInfo.problem_statement}" in ${language}. I need help with debugging or improving my solution. Here are screenshots of my code, the errors or test cases. Please provide a detailed analysis with:
+If you include code examples, use proper markdown code blocks with language specification (e.g. \`\`\`java).`;
+
+      const userPrompt = `I'm solving this coding problem: "${problemInfo.problem_statement}" in ${language}. I need help with debugging or improving my solution. Here are screenshots of my code, the errors or test cases. Please provide a detailed analysis with:
 1. What issues you found in my code
 2. Specific improvements and corrections
 3. Any optimizations that would make the solution better
-4. A clear explanation of the changes needed`
-              },
-              ...imageDataList.map(data => ({
-                type: "image_url" as const,
-                image_url: { url: `data:image/png;base64,${data}` }
-              }))
-            ]
-          }
-        ];
+4. A clear explanation of the changes needed`;
 
-        if (mainWindow) {
-          mainWindow.webContents.send("processing-status", {
-            message: "Analyzing code and generating debug feedback...",
-            progress: 60
-          });
-        }
-
-        const debugModelId = config.debuggingModel || "gpt-4o";
-        const debugResponse = await openaiClient.chat.completions.create({
-          model: debugModelId,
-          messages: messages,
-          ...getModelParams(debugModelId, { maxTokens: 4000, temperature: 0.2 }),
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Analyzing code and generating debug feedback...",
+          progress: 60,
         });
-
-        debugContent = debugResponse.choices[0].message.content;
-      } else if (this.providerClient.type === "gemini") {
-        const geminiApiKey = this.providerClient.apiKey;
-
-        try {
-          const debugPrompt = `
-You are a coding interview assistant helping debug and improve solutions. Analyze these screenshots which include either error messages, incorrect outputs, or test cases, and provide detailed debugging help.
-
-I'm solving this coding problem: "${problemInfo.problem_statement}" in ${language}. I need help with debugging or improving my solution.
-
-YOUR RESPONSE MUST FOLLOW THIS EXACT STRUCTURE WITH THESE SECTION HEADERS:
-### Issues Identified
-- List each issue as a bullet point with clear explanation
-
-### Specific Improvements and Corrections
-- List specific code changes needed as bullet points
-
-### Optimizations
-- List any performance optimizations if applicable
-
-### Explanation of Changes Needed
-Here provide a clear explanation of why the changes are needed
-
-### Key Points
-- Summary bullet points of the most important takeaways
-
-If you include code examples, use proper markdown code blocks with language specification (e.g. \`\`\`java).
-`;
-
-          const geminiMessages = [
-            {
-              role: "user",
-              parts: [
-                { text: debugPrompt },
-                ...imageDataList.map(data => ({
-                  inlineData: {
-                    mimeType: "image/png",
-                    data: data
-                  }
-                }))
-              ]
-            }
-          ];
-
-          if (mainWindow) {
-            mainWindow.webContents.send("processing-status", {
-              message: "Analyzing code and generating debug feedback with Gemini...",
-              progress: 60
-            });
-          }
-
-          const response = await axios.default.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/${config.debuggingModel || "gemini-3-flash-latest"}:generateContent?key=${geminiApiKey}`,
-            {
-              contents: geminiMessages,
-              generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 4000
-              }
-            },
-            { signal }
-          );
-
-          const responseData = response.data as GeminiResponse;
-
-          if (!responseData.candidates || responseData.candidates.length === 0) {
-            throw new Error("Empty response from Gemini API");
-          }
-
-          debugContent = responseData.candidates[0].content.parts[0].text;
-        } catch (error) {
-          console.error("Error using Gemini API for debugging:", error);
-          return {
-            success: false,
-            error: this.formatProviderError("gemini", error, "Debugging")
-          };
-        }
-      } else if (this.providerClient.type === "anthropic") {
-        const anthropicClient = this.providerClient.client;
-
-        try {
-          const debugPrompt = `
-You are a coding interview assistant helping debug and improve solutions. Analyze these screenshots which include either error messages, incorrect outputs, or test cases, and provide detailed debugging help.
-
-I'm solving this coding problem: "${problemInfo.problem_statement}" in ${language}. I need help with debugging or improving my solution.
-
-YOUR RESPONSE MUST FOLLOW THIS EXACT STRUCTURE WITH THESE SECTION HEADERS:
-### Issues Identified
-- List each issue as a bullet point with clear explanation
-
-### Specific Improvements and Corrections
-- List specific code changes needed as bullet points
-
-### Optimizations
-- List any performance optimizations if applicable
-
-### Explanation of Changes Needed
-Here provide a clear explanation of why the changes are needed
-
-### Key Points
-- Summary bullet points of the most important takeaways
-
-If you include code examples, use proper markdown code blocks with language specification.
-`;
-
-          const messages = [
-            {
-              role: "user" as const,
-              content: [
-                {
-                  type: "text" as const,
-                  text: debugPrompt
-                },
-                ...imageDataList.map(data => ({
-                  type: "image" as const,
-                  source: {
-                    type: "base64" as const,
-                    media_type: "image/png" as const,
-                    data: data
-                  }
-                }))
-              ]
-            }
-          ];
-
-          if (mainWindow) {
-            mainWindow.webContents.send("processing-status", {
-              message: "Analyzing code and generating debug feedback with Claude...",
-              progress: 60
-            });
-          }
-
-          const response = await anthropicClient.messages.create({
-            model: config.debuggingModel || "claude-3-7-sonnet-20250219",
-            max_tokens: 4000,
-            messages: messages,
-            temperature: 0.2
-          });
-
-          debugContent = (response.content[0] as { type: 'text', text: string }).text;
-        } catch (error: any) {
-          console.error("Error using Anthropic API for debugging:", error);
-
-          // Add specific handling for Claude's limitations
-          if (error.status === 429) {
-            return {
-              success: false,
-              error: "Claude API rate limit exceeded. Please wait a few minutes before trying again."
-            };
-          } else if (error.status === 413 || (error.message && error.message.includes("token"))) {
-            return {
-              success: false,
-              error: "Your screenshots contain too much information for Claude to process. Switch to OpenAI or Gemini in settings which can handle larger inputs."
-            };
-          }
-
-          return {
-            success: false,
-            error: this.formatProviderError("anthropic", error, "Debugging")
-          };
-        }
       }
-      
-      
+
+      const debugModelId = config.debuggingModel || "gpt-4o";
+      const tempOpts = isNewerModel(debugModelId) ? {} : { temperature: 0.2 };
+
+      const { text: debugText } = await generateText({
+        model: this.modelFactory(debugModelId),
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userPrompt },
+              ...imageDataList.map((data) => ({
+                type: "image" as const,
+                image: `data:image/png;base64,${data}`,
+              })),
+            ],
+          },
+        ],
+        maxOutputTokens: 4000,
+        ...tempOpts,
+        abortSignal: signal,
+      });
+
+      debugContent = debugText;
+
       if (mainWindow) {
         mainWindow.webContents.send("processing-status", {
           message: "Debug analysis complete",
@@ -1213,7 +790,7 @@ If you include code examples, use proper markdown code blocks with language spec
       }
 
       let formattedDebugContent = debugContent;
-      
+
       if (!debugContent.includes('# ') && !debugContent.includes('## ')) {
         formattedDebugContent = debugContent
           .replace(/issues identified|problems found|bugs found/i, '## Issues Identified')
@@ -1223,10 +800,10 @@ If you include code examples, use proper markdown code blocks with language spec
       }
 
       const bulletPoints = formattedDebugContent.match(/(?:^|\n)[ ]*(?:[-*•]|\d+\.)[ ]+([^\n]+)/g);
-      const thoughts = bulletPoints 
+      const thoughts = bulletPoints
         ? bulletPoints.map(point => point.replace(/^[ ]*(?:[-*•]|\d+\.)[ ]+/, '').trim()).slice(0, 5)
         : ["Debug analysis based on your screenshots"];
-      
+
       const response = {
         code: extractedCode,
         debug_analysis: formattedDebugContent,

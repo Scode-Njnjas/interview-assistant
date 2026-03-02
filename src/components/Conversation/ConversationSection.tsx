@@ -286,12 +286,6 @@ export const ConversationSection: React.FC = () => {
     });
   };
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <div className="flex flex-col h-full">
       {/* Conversation Commands Bar - Matches QueueCommands/SolutionCommands style */}

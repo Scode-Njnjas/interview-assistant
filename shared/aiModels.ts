@@ -706,7 +706,7 @@ const NEWER_MODEL_PREFIXES = [
   "codex",
 ];
 
-function isNewerModel(model: string): boolean {
+export function isNewerModel(model: string): boolean {
   const lower = model.toLowerCase();
   // Strip OpenRouter-style provider prefix (e.g., "openai/gpt-5" -> "gpt-5")
   const modelName = lower.includes("/") ? lower.split("/").pop()! : lower;

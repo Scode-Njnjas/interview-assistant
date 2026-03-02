@@ -2,10 +2,8 @@
 // Fetches available models from each provider's API with caching.
 // Uses models.dev as the universal catalog with pricing data,
 // enriched by provider-specific APIs when available.
-// Runs exclusively in the main process.
+// Uses native fetch (Node 18+) — no axios dependency.
 
-import { OpenAI } from "openai";
-import * as axios from "axios";
 import { APIProvider, FetchedModel, ALLOWED_MODELS } from "../shared/aiModels";
 
 export interface ModelFetchResult {
@@ -34,7 +32,7 @@ interface ModelsDevModel {
   name: string;
   family?: string;
   cost: {
-    input: number;   // USD per million tokens
+    input: number;
     output: number;
     cache_read?: number;
     cache_write?: number;
@@ -61,6 +59,16 @@ interface ModelsDevProvider {
 
 type ModelsDevData = Record<string, ModelsDevProvider>;
 
+/** Helper: fetch JSON with timeout */
+async function fetchJson(url: string, options?: RequestInit & { timeout?: number }): Promise<any> {
+  const { timeout = 15000, ...fetchOpts } = options || {};
+  const response = await fetch(url, { ...fetchOpts, signal: AbortSignal.timeout(timeout) });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 export class ModelFetchService {
   private cache: Map<string, CacheEntry> = new Map();
   private modelsDevCache: { data: ModelsDevData | null; timestamp: number; etag: string | null } = {
@@ -68,32 +76,22 @@ export class ModelFetchService {
     timestamp: 0,
     etag: null,
   };
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-  private readonly MODELS_DEV_CACHE_TTL = 60 * 60 * 1000; // 1 hour (data changes rarely)
+  private readonly CACHE_TTL = 5 * 60 * 1000;
+  private readonly MODELS_DEV_CACHE_TTL = 60 * 60 * 1000;
 
-  // Map our APIProvider to models.dev provider IDs
   private readonly PROVIDER_TO_MODELS_DEV: Record<APIProvider, string> = {
     openai: "openai",
     gemini: "google",
     anthropic: "anthropic",
     "azure-openai": "azure",
-    openrouter: "", // OpenRouter uses its own API
+    openrouter: "",
   };
 
-  /**
-   * Fetches models for a given provider + credentials.
-   * Strategy:
-   * 1. Try provider-specific API first (has real-time model availability)
-   * 2. Enrich with models.dev pricing data
-   * 3. Fall back to models.dev catalog if API fails
-   * 4. Fall back to static ALLOWED_MODELS if everything fails
-   */
   public async fetchModels(
     provider: APIProvider,
     apiKey: string,
     options?: ModelFetchOptions
   ): Promise<ModelFetchResult> {
-    // No API key: return models.dev catalog (no provider API call needed)
     if (!apiKey || apiKey.trim().length === 0) {
       await this.ensureModelsDevData();
       const catalogModels = this.getModelsFromModelsDev(provider);
@@ -105,7 +103,6 @@ export class ModelFetchService {
 
     const cacheKey = `${provider}:${this.hashKey(apiKey)}`;
 
-    // Return cache if fresh and not forced
     if (!options?.forceRefresh) {
       const cached = this.cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
@@ -113,14 +110,12 @@ export class ModelFetchService {
       }
     }
 
-    // Pre-fetch models.dev data (non-blocking, cached for 1 hour)
     const modelsDevPromise = this.ensureModelsDevData();
 
     try {
       let models: FetchedModel[];
       let source: "api" | "models.dev" | "static" = "api";
 
-      // Try provider-specific API first
       try {
         switch (provider) {
           case "openai":
@@ -142,7 +137,6 @@ export class ModelFetchService {
             throw new Error(`Unknown provider: ${provider}`);
         }
       } catch (apiError: any) {
-        // API failed — fall back to models.dev
         console.warn(`Provider API failed for ${provider}: ${apiError.message}. Falling back to models.dev`);
         await modelsDevPromise;
         models = this.getModelsFromModelsDev(provider);
@@ -154,24 +148,17 @@ export class ModelFetchService {
         }
       }
 
-      // Enrich with models.dev pricing if not from OpenRouter (which has its own pricing)
       if (provider !== "openrouter") {
         await modelsDevPromise;
         models = this.enrichWithModelsDev(models, provider);
       }
 
-      // Update cache
       this.cache.set(cacheKey, { models, timestamp: Date.now(), source });
       return { success: true, models, source };
     } catch (error: any) {
       console.error(`Failed to fetch models for ${provider}:`, error.message);
       const fallback = this.getStaticFallbackModels(provider);
-      return {
-        success: false,
-        models: fallback,
-        error: error.message || "Failed to fetch models",
-        source: "static",
-      };
+      return { success: false, models: fallback, error: error.message || "Failed to fetch models", source: "static" };
     }
   }
 
@@ -179,16 +166,9 @@ export class ModelFetchService {
   // models.dev catalog
   // =============================================
 
-  /**
-   * Ensures models.dev data is loaded and cached.
-   * Uses ETag for conditional requests to avoid re-downloading 1.2MB.
-   */
   private async ensureModelsDevData(): Promise<void> {
-    if (
-      this.modelsDevCache.data &&
-      Date.now() - this.modelsDevCache.timestamp < this.MODELS_DEV_CACHE_TTL
-    ) {
-      return; // Cache still fresh
+    if (this.modelsDevCache.data && Date.now() - this.modelsDevCache.timestamp < this.MODELS_DEV_CACHE_TTL) {
+      return;
     }
 
     try {
@@ -197,35 +177,33 @@ export class ModelFetchService {
         headers["If-None-Match"] = this.modelsDevCache.etag;
       }
 
-      const response = await axios.default.get("https://models.dev/api.json", {
+      const response = await fetch("https://models.dev/api.json", {
         headers,
-        timeout: 15000,
-        validateStatus: (status) => status === 200 || status === 304,
+        signal: AbortSignal.timeout(15000),
       });
 
       if (response.status === 304) {
-        // Not modified — refresh timestamp only
         this.modelsDevCache.timestamp = Date.now();
         return;
       }
 
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json() as ModelsDevData;
       this.modelsDevCache = {
-        data: response.data as ModelsDevData,
+        data,
         timestamp: Date.now(),
-        etag: response.headers?.etag || null,
+        etag: response.headers.get("etag"),
       };
 
-      console.log("models.dev catalog loaded:", Object.keys(response.data).length, "providers");
+      console.log("models.dev catalog loaded:", Object.keys(data).length, "providers");
     } catch (error: any) {
       console.warn("Failed to fetch models.dev catalog:", error.message);
-      // Keep stale cache if available
     }
   }
 
-  /**
-   * Gets models from models.dev for a provider (fallback when API is unavailable).
-   * Filters to chat-capable models only.
-   */
   private getModelsFromModelsDev(provider: APIProvider): FetchedModel[] {
     const data = this.modelsDevCache.data;
     if (!data) return [];
@@ -238,11 +216,9 @@ export class ModelFetchService {
 
     return models
       .filter((m) => {
-        // Exclude embeddings, deprecated
         if (m.status === "deprecated") return false;
         if (m.id.includes("embedding")) return false;
         if (m.id.includes("tts")) return false;
-        // Must have meaningful output token limit (not embeddings)
         if (m.limit?.output === 0 && m.cost?.output === 0) return false;
         return true;
       })
@@ -250,11 +226,6 @@ export class ModelFetchService {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /**
-   * Merges models.dev catalog into API-fetched models:
-   * 1. Enriches existing API models with pricing/capabilities from models.dev
-   * 2. Appends models.dev models that weren't in the API result (comprehensive catalog)
-   */
   private enrichWithModelsDev(models: FetchedModel[], provider: APIProvider): FetchedModel[] {
     const data = this.modelsDevCache.data;
     if (!data) return models;
@@ -265,7 +236,6 @@ export class ModelFetchService {
     const catalog = data[modelsDevId].models || {};
     const apiModelIds = new Set(models.map((m) => m.id));
 
-    // Step 1: Enrich existing API models with pricing
     const enriched = models.map((model) => {
       const catalogEntry = catalog[model.id];
       if (catalogEntry) {
@@ -288,7 +258,6 @@ export class ModelFetchService {
       return model;
     });
 
-    // Step 2: Append models from models.dev that weren't returned by the API
     const catalogModels = this.getModelsFromModelsDev(provider);
     const additional = catalogModels.filter((m) => !apiModelIds.has(m.id));
 
@@ -321,27 +290,24 @@ export class ModelFetchService {
   }
 
   // =============================================
-  // Provider-specific API fetchers
+  // Provider-specific API fetchers (using native fetch)
   // =============================================
 
   private async fetchOpenAIModels(apiKey: string): Promise<FetchedModel[]> {
-    const client = new OpenAI({ apiKey, timeout: 15000 });
-    const models: OpenAI.Model[] = [];
-    for await (const model of client.models.list()) {
-      models.push(model);
-    }
+    const data = await fetchJson("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
 
     const chatPrefixes = ["gpt-4", "gpt-3.5", "gpt-5", "o1", "o3", "o4", "chatgpt-"];
     const excludePrefixes = ["text-embedding-", "whisper-", "tts-", "dall-e-", "omni-moderation-", "text-moderation-"];
 
-    return models
-      .filter((m) => {
+    return (data.data || [])
+      .filter((m: any) => {
         const id = m.id.toLowerCase();
-        const isExcluded = excludePrefixes.some((p) => id.startsWith(p));
-        if (isExcluded) return false;
+        if (excludePrefixes.some((p) => id.startsWith(p))) return false;
         return chatPrefixes.some((p) => id.startsWith(p));
       })
-      .map((m) => ({
+      .map((m: any) => ({
         id: m.id,
         name: m.id,
         provider: "openai" as APIProvider,
@@ -350,44 +316,32 @@ export class ModelFetchService {
           vision: m.id.includes("4o") || m.id.includes("gpt-4") || m.id.includes("gpt-5"),
         },
       }))
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .sort((a: FetchedModel, b: FetchedModel) => a.id.localeCompare(b.id));
   }
 
   private async fetchGeminiModels(apiKey: string): Promise<FetchedModel[]> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=1000`;
-    const response = await axios.default.get(url, { timeout: 15000 });
+    const data = await fetchJson(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=1000`
+    );
 
-    const models = response.data.models || [];
-    return models
-      .filter(
-        (m: any) =>
-          m.supportedGenerationMethods?.includes("generateContent") &&
-          m.name?.includes("gemini")
-      )
+    return (data.models || [])
+      .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent") && m.name?.includes("gemini"))
       .map((m: any) => ({
         id: m.name.replace("models/", ""),
         name: m.displayName || m.name.replace("models/", ""),
         provider: "gemini" as APIProvider,
         contextLength: m.inputTokenLimit,
-        capabilities: {
-          chat: true,
-          vision: m.name.includes("pro") || m.name.includes("flash"),
-        },
+        capabilities: { chat: true, vision: m.name.includes("pro") || m.name.includes("flash") },
       }))
       .sort((a: FetchedModel, b: FetchedModel) => a.name.localeCompare(b.name));
   }
 
   private async fetchAnthropicModels(apiKey: string): Promise<FetchedModel[]> {
-    const response = await axios.default.get("https://api.anthropic.com/v1/models", {
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      timeout: 15000,
+    const data = await fetchJson("https://api.anthropic.com/v1/models", {
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     });
 
-    const models = response.data?.data || [];
-    return models
+    return (data.data || [])
       .map((m: any) => ({
         id: m.id,
         name: m.display_name || m.id,
@@ -397,35 +351,21 @@ export class ModelFetchService {
       .sort((a: FetchedModel, b: FetchedModel) => a.name.localeCompare(b.name));
   }
 
-  private async fetchAzureModels(
-    apiKey: string,
-    endpoint?: string,
-    apiVersion?: string
-  ): Promise<FetchedModel[]> {
-    if (!endpoint) {
-      throw new Error("Azure OpenAI requires an endpoint URL");
-    }
+  private async fetchAzureModels(apiKey: string, endpoint?: string, apiVersion?: string): Promise<FetchedModel[]> {
+    if (!endpoint) throw new Error("Azure OpenAI requires an endpoint URL");
 
     const cleanEndpoint = endpoint.replace(/\/$/, "");
-    const version = apiVersion || "2025-01-01-preview";
+    const version = apiVersion || "2024-12-01-preview";
 
-    // Try Azure models list endpoint (may not be available on all resources)
     try {
-      const url = `${cleanEndpoint}/openai/models?api-version=${version}`;
-      const response = await axios.default.get(url, {
+      const data = await fetchJson(`${cleanEndpoint}/openai/models?api-version=${version}`, {
         headers: { "api-key": apiKey },
-        timeout: 15000,
       });
 
-      const models = response.data?.data || [];
+      const models = data.data || [];
       if (models.length > 0) {
         return models
-          .filter(
-            (m: any) =>
-              m.capabilities?.chat_completion ||
-              m.capabilities?.inference ||
-              m.status === "succeeded"
-          )
+          .filter((m: any) => m.capabilities?.chat_completion || m.capabilities?.inference || m.status === "succeeded")
           .map((m: any) => ({
             id: m.id,
             name: m.id,
@@ -437,30 +377,20 @@ export class ModelFetchService {
           }))
           .sort((a: FetchedModel, b: FetchedModel) => a.id.localeCompare(b.id));
       }
-    } catch (azureApiErr: any) {
-      console.warn(`Azure models list endpoint not available: ${azureApiErr.message}`);
+    } catch (err: any) {
+      console.warn(`Azure models list endpoint not available: ${err.message}`);
     }
 
-    // Azure models list not available — fall back to models.dev
-    // This is common since the /openai/models endpoint isn't supported on all Azure resources
     throw new Error("Azure models list not available, falling back to catalog");
   }
 
   private async fetchOpenRouterModels(apiKey: string): Promise<FetchedModel[]> {
-    const response = await axios.default.get("https://openrouter.ai/api/v1/models", {
+    const data = await fetchJson("https://openrouter.ai/api/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },
-      timeout: 15000,
     });
 
-    const models = response.data?.data || [];
-    return models
-      .filter(
-        (m: any) =>
-          !m.id.includes("embedding") &&
-          !m.id.includes("tts") &&
-          !m.id.includes("whisper") &&
-          !m.id.includes("dall-e")
-      )
+    return (data.data || [])
+      .filter((m: any) => !m.id.includes("embedding") && !m.id.includes("tts") && !m.id.includes("whisper") && !m.id.includes("dall-e"))
       .map((m: any) => {
         const promptCost = parseFloat(m.pricing?.prompt || "0");
         const completionCost = parseFloat(m.pricing?.completion || "0");
@@ -468,35 +398,23 @@ export class ModelFetchService {
           id: m.id,
           name: m.name || m.id,
           provider: "openrouter" as APIProvider,
-          // OpenRouter pricing is per-token; convert to per-million-tokens
-          pricing: {
-            input: promptCost * 1_000_000,
-            output: completionCost * 1_000_000,
-          },
+          pricing: { input: promptCost * 1_000_000, output: completionCost * 1_000_000 },
           contextLength: m.context_length || undefined,
-          capabilities: {
-            chat: true,
-            vision: m.architecture?.input_modalities?.includes("image"),
-          },
+          capabilities: { chat: true, vision: m.architecture?.input_modalities?.includes("image") },
         };
       })
       .sort((a: FetchedModel, b: FetchedModel) => a.name.localeCompare(b.name));
   }
 
   // =============================================
-  // Fallback & utilities
+  // Utilities
   // =============================================
 
   private getStaticFallbackModels(provider: APIProvider): FetchedModel[] {
     const allowed = ALLOWED_MODELS[provider] || [];
-    return allowed.map((id) => ({
-      id,
-      name: id,
-      provider,
-    }));
+    return allowed.map((id) => ({ id, name: id, provider }));
   }
 
-  /** Simple hash to avoid storing full API keys as cache keys */
   private hashKey(key: string): string {
     let hash = 0;
     for (let i = 0; i < key.length; i++) {
@@ -507,13 +425,10 @@ export class ModelFetchService {
     return hash.toString(36);
   }
 
-  /** Clear cache for a provider or all */
   public clearCache(provider?: APIProvider): void {
     if (provider) {
       for (const key of this.cache.keys()) {
-        if (key.startsWith(provider)) {
-          this.cache.delete(key);
-        }
+        if (key.startsWith(provider)) this.cache.delete(key);
       }
     } else {
       this.cache.clear();

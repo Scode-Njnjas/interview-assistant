@@ -3,7 +3,6 @@
  * Follows the same design pattern as QueueCommands and SolutionCommands
  */
 import React, { useState, useEffect, useRef } from "react";
-import { useToast } from "../../contexts/toast";
 import { COMMAND_KEY } from "../../utils/platform";
 
 interface ConversationCommandsProps {
@@ -31,7 +30,6 @@ export const ConversationCommands: React.FC<ConversationCommandsProps> = ({
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const { showToast } = useToast();
 
   useEffect(() => {
     let tooltipHeight = 0;

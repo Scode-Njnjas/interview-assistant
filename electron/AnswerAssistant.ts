@@ -3,33 +3,14 @@
  * Follows Single Responsibility Principle - only handles answer suggestion generation
  * Uses Dependency Inversion Principle - depends on IConversationManager interface
  */
-import * as axios from 'axios';
+import { generateText } from 'ai';
 import { configHelper, CandidateProfile } from './ConfigHelper';
 import { IConversationManager } from './ConversationManager';
 import {
   DEFAULT_ANSWER_MODELS,
-  getModelParams,
+  isNewerModel,
 } from "../shared/aiModels";
-import { ProviderClient, createProviderClient, isOpenAICompatible } from './ProviderClientFactory';
-
-// Interface for Gemini API requests
-interface GeminiMessage {
-  role: string;
-  parts: Array<{
-    text?: string;
-  }>;
-}
-
-interface GeminiResponse {
-  candidates: Array<{
-    content: {
-      parts: Array<{
-        text: string;
-      }>;
-    };
-    finishReason: string;
-  }>;
-}
+import { AIModelFactory, createModelFactory } from './ProviderClientFactory';
 
 export interface AnswerSuggestion {
   suggestions: string[];
@@ -45,7 +26,7 @@ export interface IAnswerAssistant {
 }
 
 export class AnswerAssistant implements IAnswerAssistant {
-  private providerClient: ProviderClient | null = null;
+  private modelFactory: AIModelFactory | null = null;
 
   private formatProviderError(provider: string, error: any, context: string): string {
     const status =
@@ -61,7 +42,7 @@ export class AnswerAssistant implements IAnswerAssistant {
 
   constructor() {
     this.initializeAIClients();
-    
+
     // Listen for config changes to re-initialize the AI clients
     configHelper.on('config-updated', () => {
       this.initializeAIClients();
@@ -72,7 +53,7 @@ export class AnswerAssistant implements IAnswerAssistant {
    * Initializes AI clients based on API provider from config
    */
   private initializeAIClients(): void {
-    this.providerClient = createProviderClient();
+    this.modelFactory = createModelFactory();
   }
 
   /**
@@ -90,9 +71,9 @@ export class AnswerAssistant implements IAnswerAssistant {
     candidateProfile?: CandidateProfile
   ): Promise<AnswerSuggestion> {
     const config = configHelper.loadConfig();
-    
+
     // Check if any AI client is initialized
-    if (!this.providerClient) {
+    if (!this.modelFactory) {
       throw new Error('AI client not initialized. Please set API key in settings.');
     }
 
@@ -105,7 +86,7 @@ export class AnswerAssistant implements IAnswerAssistant {
 
     // Get candidate profile from config if not provided
     const profile = candidateProfile || configHelper.loadConfig().candidateProfile;
-    
+
     const contextPrompt = this.buildContextPrompt(
       currentQuestion,
       conversationHistory,
@@ -118,86 +99,33 @@ export class AnswerAssistant implements IAnswerAssistant {
 
     try {
       let suggestionsText = '';
-      
+
       // Get the configured answer model, fallback to default if not set
       const answerModel = config.answerModel || DEFAULT_ANSWER_MODELS[config.apiProvider];
 
-      if (isOpenAICompatible(this.providerClient)) {
-        const client = this.providerClient.client;
-        const response = await client.chat.completions.create({
-          model: answerModel,
-          messages: [
-            {
-              role: 'system',
-              content: systemMessage
-            },
-            {
-              role: 'user',
-              content: contextPrompt
-            }
-          ],
-          ...getModelParams(answerModel, { maxTokens: 500, temperature: 0.7 }),
-        });
+      const tempOpts: { temperature?: number } = isNewerModel(answerModel) ? {} : { temperature: 0.7 };
 
-        suggestionsText = response.choices[0]?.message?.content || '';
-      } else if (this.providerClient.type === "gemini") {
-        const geminiApiKey = this.providerClient.apiKey;
-        const geminiMessages: GeminiMessage[] = [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `${systemMessage}\n\n${contextPrompt}`
-              }
-            ]
-          }
-        ];
+      const { text: generatedText } = await generateText({
+        model: this.modelFactory(answerModel),
+        system: systemMessage,
+        prompt: contextPrompt,
+        maxOutputTokens: 500,
+        ...tempOpts,
+      });
 
-        const response = await axios.default.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${answerModel}:generateContent?key=${geminiApiKey}`,
-          {
-            contents: geminiMessages,
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 500
-            }
-          }
-        );
-
-        const responseData = response.data as GeminiResponse;
-        if (responseData.candidates && responseData.candidates.length > 0) {
-          suggestionsText = responseData.candidates[0].content.parts[0].text;
-        }
-      } else if (this.providerClient.type === "anthropic") {
-        const anthropicClient = this.providerClient.client;
-        const response = await anthropicClient.messages.create({
-          model: answerModel,
-          max_tokens: 500,
-          messages: [
-            {
-              role: 'user',
-              content: `${systemMessage}\n\n${contextPrompt}`
-            }
-          ],
-          temperature: 0.7
-        });
-
-        suggestionsText = (response.content[0] as { type: 'text', text: string }).text;
-      } else {
-        throw new Error('No AI client available. Please configure your API key in settings.');
-      }
+      suggestionsText = generatedText;
 
       const suggestions = this.parseSuggestions(suggestionsText);
 
       return {
-        suggestions: suggestions.length > 0 
-          ? suggestions 
+        suggestions: suggestions.length > 0
+          ? suggestions
           : ['Consider answering based on your experience and background.'],
         reasoning: 'Based on conversation history and previous answers',
       };
     } catch (error: any) {
       console.error('Error generating suggestions:', error);
-      
+
       // Provide specific error messages based on provider
       const status = error?.status ?? error?.response?.status;
       if (status === 401) {
@@ -221,7 +149,7 @@ export class AnswerAssistant implements IAnswerAssistant {
     candidateProfile?: CandidateProfile
   ): string {
     const shouldUseResume = this.isResumeRelevant(currentQuestion);
-    let prompt = `You are an AI assistant helping someone during an interview. 
+    let prompt = `You are an AI assistant helping someone during an interview.
 The interviewer just asked: "${currentQuestion}"
 
 Previous conversation:
@@ -239,15 +167,15 @@ ${candidateProfile.jobDescription}`;
     // Add candidate profile context if available
     if (candidateProfile && shouldUseResume) {
       const profileSections: string[] = [];
-      
+
       if (candidateProfile.name) {
         profileSections.push(`Name: ${candidateProfile.name}`);
       }
-      
+
       if (candidateProfile.resume) {
         profileSections.push(`Resume: ${candidateProfile.resume}`);
       }
-      
+
       if (profileSections.length > 0) {
         prompt += `\n\nCandidate Profile (use this to personalize suggestions):
 ${profileSections.join('\n')}`;
@@ -304,7 +232,7 @@ Format as simple bullet points, one per line starting with "-".`;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      
+
       // Skip empty lines
       if (!line) {
         if (currentSuggestion) {
@@ -315,9 +243,9 @@ Format as simple bullet points, one per line starting with "-".`;
       }
 
       // Check if this line starts a new suggestion (bullet point, number, or starts with capital letter after empty line)
-      const isNewSuggestion = 
-        line.startsWith('-') || 
-        line.startsWith('•') || 
+      const isNewSuggestion =
+        line.startsWith('-') ||
+        line.startsWith('•') ||
         line.match(/^\d+\./) ||
         (i > 0 && !lines[i - 1] && line.length > 0 && line.length < 200);
 
@@ -359,6 +287,6 @@ Format as simple bullet points, one per line starting with "-".`;
    * Checks if any AI client is initialized
    */
   public isInitialized(): boolean {
-    return this.providerClient !== null;
+    return this.modelFactory !== null;
   }
 }

@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { app } from "electron"
 import { EventEmitter } from "events"
-import { OpenAI } from "openai"
+// No direct SDK imports — uses fetch for API key testing
 import {
   APIProvider,
   DEFAULT_PROVIDER,
@@ -29,7 +29,7 @@ interface Config {
   language: string;
   opacity: number;
   azureEndpoint?: string;      // Azure OpenAI endpoint URL
-  azureApiVersion?: string;    // Azure API version (default: "2025-01-01-preview")
+  azureApiVersion?: string;    // Azure API version (default: "2024-12-01-preview")
   candidateProfile?: CandidateProfile;  // Candidate profile for personalized AI suggestions
 }
 
@@ -407,27 +407,17 @@ export class ConfigHelper extends EventEmitter {
    */
   private async testOpenAIKey(apiKey: string): Promise<{valid: boolean, error?: string}> {
     try {
-      const openai = new OpenAI({ apiKey });
-      // Make a simple API call to test the key
-      await openai.models.list();
-      return { valid: true };
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.ok) return { valid: true };
+      if (response.status === 401) return { valid: false, error: 'Invalid API key. Please check your OpenAI key and try again.' };
+      if (response.status === 429) return { valid: false, error: 'Rate limit exceeded. Your OpenAI API key has reached its request limit or has insufficient quota.' };
+      return { valid: false, error: `OpenAI API error (status ${response.status})` };
     } catch (error: any) {
       console.error('OpenAI API key test failed:', error);
-      
-      // Determine the specific error type for better error messages
-      let errorMessage = 'Unknown error validating OpenAI API key';
-      
-      if (error.status === 401) {
-        errorMessage = 'Invalid API key. Please check your OpenAI key and try again.';
-      } else if (error.status === 429) {
-        errorMessage = 'Rate limit exceeded. Your OpenAI API key has reached its request limit or has insufficient quota.';
-      } else if (error.status === 500) {
-        errorMessage = 'OpenAI server error. Please try again later.';
-      } else if (error.message) {
-        errorMessage = `Error: ${error.message}`;
-      }
-      
-      return { valid: false, error: errorMessage };
+      return { valid: false, error: error.message || 'Unknown error validating OpenAI API key' };
     }
   }
   

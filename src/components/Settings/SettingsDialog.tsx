@@ -9,7 +9,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { Settings, Loader2, RefreshCw, Search } from "lucide-react";
+import { Loader2, RefreshCw, Search } from "lucide-react";
 import { useToast } from "../../contexts/toast";
 import { CandidateProfileSection, CandidateProfile } from "./CandidateProfileSection";
 import {
@@ -178,8 +178,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setIsLoading(false);
         });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open]); // Only reload when dialog opens/closes
 
   // Handle API provider change
   const handleProviderChange = (provider: APIProvider) => {
